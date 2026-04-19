@@ -1,0 +1,77 @@
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js app
+        run: npm run build
+
+      # The App Service needs the build output + node_modules to run.
+      # We zip everything Next.js needs for a production server start.
+      - name: Create deployment package
+        run: |
+          zip -r deploy.zip \
+            .next \
+            public \
+            pages \
+            components \
+            lib \
+            styles \
+            package.json \
+            package-lock.json \
+            next.config.js \
+            --exclude "node_modules/*"
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_APP_SERVICE_NAME }}
+          publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+          package: deploy.zip
+
+# ─── GitHub Secrets required ──────────────────────────────────────────────────
+#
+# AZURE_APP_SERVICE_NAME   — the name of your App Service (e.g. pipeline-dashboard)
+# AZURE_PUBLISH_PROFILE    — download from App Service → Overview → Get publish profile
+#
+# ─── Azure App Service Configuration (set in Portal → Configuration) ──────────
+#
+# AZURE_STORAGE_ACCOUNT    — your storage account name
+# AZURE_TABLE_NAME         — your table name (default: PipelineStatus)
+# WEBSITE_RUN_FROM_PACKAGE — set to "1"
+# SCM_DO_BUILD_DURING_DEPLOYMENT — set to "true"
+#
+# Do NOT set AZURE_TENANT_ID / CLIENT_ID / CLIENT_SECRET in App Service —
+# Managed Identity handles auth automatically once enabled.
+#
+# ─── One-time Azure setup ────────────────────────────────────────────────────
+#
+# 1. Create the App Service (Node.js 20 LTS runtime)
+# 2. Enable System-assigned Managed Identity:
+#      App Service → Identity → System assigned → On
+# 3. Grant Storage Table Data Reader:
+#      Storage Account → Access control (IAM) → Add role assignment
+#      Role: Storage Table Data Reader
+#      Assign access to: Managed Identity
+#      Select your App Service
+# 4. Add GitHub secrets (see above)
+# 5. Push to main — the workflow handles the rest
